@@ -3,6 +3,7 @@
 Created on Wed Sep 22 14:34:12 2021
 
 @author: zphelan
+Modified by Pengju Xing
 """
 import numpy as np
 from scipy import stats
@@ -21,27 +22,42 @@ def preprocess(df, filtering='z', zthres=3):
 
 # Remove values explicitly that should not be in the data frame.
 def base_filter(df):
-    df = df[df['Pump Pressure'] > 0]
-    df = df[df['Pump Pressure'] < 10_000]
-    df = df[df['Differential Pressure'] < 8000]
-    # df = df[df['Flow In'] < 1_000]
-    df = df[df['Top Drive Torque (ft-lbs)'] > 0]
-    df = df[df['Weight on Bit'] > 0]
-    df = df[df['Weight on Bit'] < 100]
-    df = df[df['Bit RPM'] < 500]
+    df = df[df['Top Drive Torque (kft_lb)'] > 0]
+    df = df[df['Top Drive Torque (kft_lb)'] < 100]
+    df = df[df['Standpipe Pressure (psi)'] > 0]
+    df = df[df['Standpipe Pressure (psi)'] < 10_000]
+    df = df[df['Bit RPM (RPM)'] > 0]
+    df = df[df['Bit RPM (RPM)'] < 500]
+    
+    df = df[df['Top Drive Rotary (RPM)'] > 0]
+    df = df[df['Top Drive Rotary (RPM)'] < 500]
+    
+
+    df = df[df['Weight on Bit (klbs)'] > 0]
+    df = df[df['Weight on Bit (klbs)'] < 200]
+    
+    df = df[df['Differential Pressure (psi)'] < 8000]
+    
+    df = df[df['Bit Torque (kft_lb)'] > 0]
+    df = df[df['Bit Torque (kft_lb)'] < 100]
+    
     return df
 
 
-def remove_stopped(df, var='Total Depth'):
+def remove_stopped(df, var):
+    # drop_duplicates return DataFrame with duplicate rows removed.
+    # inplace is True means modify the current dataframe
     df.drop_duplicates(inplace=True)
     # Base cases
     df = df[df < 12000]
     df = df[df >= 0]
+    
+    # Here reset_index does not modify the existing df, but return a new dataframe (temp) 
     temp = df.reset_index()
 
     vals = temp[var].values
 
-    # Remove depth values that are decreasing, those are impossible
+    # Remove depth values that are decreasing or the same, those are impossible
     to_drop = []
     prev = 0
     for i in range(1, vals.size):
@@ -50,10 +66,26 @@ def remove_stopped(df, var='Total Depth'):
 
         else:
             prev = i
-
+            
+    # axis = 0 means index
     df.drop(to_drop, axis=0, inplace=True)
     return df
-    
+
+def calculateROP(dataBaseFilterIncreaseDepth):
+    time = dataBaseFilterIncreaseDepth['Time']
+    depth = dataBaseFilterIncreaseDepth['Hole Depth (feet)'] 
+    shiftedTime = time.shift(1)
+    shiftedDepth = depth.shift(1)
+    dataBaseFilterIncreaseDepth['Time Diff (sec)'] = time.values - shiftedTime.values
+    dataBaseFilterIncreaseDepth['Depth Diff (ft)'] = depth.values - shiftedDepth.values
+    dataBaseFilterIncreaseDepth.dropna(inplace=True)
+    # convert the time difference to be seconds
+    dataBaseFilterIncreaseDepth['Time Diff (sec)'] = dataBaseFilterIncreaseDepth['Time Diff (sec)'].dt.total_seconds().astype(int)
+    dataBaseFilterIncreaseDepth['Calculated ROP (ft/hr)'] = dataBaseFilterIncreaseDepth['Depth Diff (ft)'] / dataBaseFilterIncreaseDepth['Time Diff (sec)'] * 3600
+    # moving average of the ROP
+    dataBaseFilterIncreaseDepth['Calculated ROP (ft/hr) SMA60'] = dataBaseFilterIncreaseDepth['Calculated ROP (ft/hr)'].rolling(60).mean()
+    dataBaseFilterIncreaseDepth.dropna(inplace=True)
+    return dataBaseFilterIncreaseDepth
 
 def filter_df(df, filtering='iqr', zthres=3):
     filtering = filtering.lower()  # standardize to lowercase
